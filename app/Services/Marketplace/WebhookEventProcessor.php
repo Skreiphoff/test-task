@@ -11,6 +11,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderStatusHistory;
 use App\Models\WebhookEvent;
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
@@ -90,13 +91,26 @@ class WebhookEventProcessor
             OrderStatusHistory::query()->create([
                 'order_id' => $order->id,
                 'status' => $snapshot->status,
-                'at' => $snapshot->transitionTime(),
+                'at' => $this->transitionTime($order, $snapshot),
                 'event_id' => $eventId,
             ]);
             $this->notify($snapshot);
         }
 
         return self::OUTCOME_APPLIED;
+    }
+
+    /**
+     * `paid_at` / `cancelled_at` describe the first time the state was reached. After a
+     * manual rollback they lie in the past, so history must fall back to `updated_at`
+     * to stay chronological.
+     */
+    private function transitionTime(Order $order, OrderSnapshot $snapshot): CarbonInterface
+    {
+        $at = $snapshot->transitionTime();
+        $lastEntry = $order->history()->reorder()->max('at');
+
+        return $lastEntry !== null && $at < CarbonImmutable::parse($lastEntry) ? $snapshot->updatedAt : $at;
     }
 
     /**
