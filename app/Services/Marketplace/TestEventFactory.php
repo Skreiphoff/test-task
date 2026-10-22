@@ -6,6 +6,7 @@ namespace App\Services\Marketplace;
 
 use App\Enums\OrderStatusEnum;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\WebhookEvent;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
@@ -68,20 +69,23 @@ class TestEventFactory
         $snapshot['status'] = $target->value;
         $snapshot['updated_at'] = $at->toIso8601String();
 
-        match ($target) {
-            // `??=`: keep facts that already happened, e.g. the original payment time after a rollback.
-            OrderStatusEnum::Paid => $snapshot['paid_at'] ??= $at->toIso8601String(),
-            OrderStatusEnum::Shipped => $snapshot['shipment'] ??= [
+        // `??=`: keep facts that already happened, e.g. the original payment time after a rollback.
+        if ($target === OrderStatusEnum::Paid) {
+            $snapshot['paid_at'] ??= $at->toIso8601String();
+        }
+
+        if ($target === OrderStatusEnum::Shipped) {
+            $snapshot['shipment'] ??= [
                 'carrier' => 'СДЭК',
                 'tracking_number' => (string) random_int(1000000000, 1999999999),
                 'tracking_url' => 'https://www.cdek.ru/ru/tracking',
-            ],
-            OrderStatusEnum::Cancelled => [
-                $snapshot['cancelled_at'] ??= $at->toIso8601String(),
-                $snapshot['cancel_reason'] ??= 'Тест: отмена из админки',
-            ],
-            default => null,
-        };
+            ];
+        }
+
+        if ($target === OrderStatusEnum::Cancelled) {
+            $snapshot['cancelled_at'] ??= $at->toIso8601String();
+            $snapshot['cancel_reason'] ??= 'Тест: отмена из админки';
+        }
 
         return $this->envelope('order.'.$target->value, $snapshot);
     }
@@ -118,7 +122,7 @@ class TestEventFactory
                 'name' => $order->customer_name,
                 'phone' => $order->customer_phone,
             ],
-            'items' => $order->items->map(fn ($item): array => [
+            'items' => $order->items->map(fn (OrderItem $item): array => [
                 'sku' => $item->sku,
                 'name' => $item->name,
                 'quantity' => $item->quantity,

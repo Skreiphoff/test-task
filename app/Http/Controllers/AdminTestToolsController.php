@@ -29,16 +29,15 @@ class AdminTestToolsController extends Controller
     public function transition(string $id, OrderStatusEnum $status): RedirectResponse
     {
         $order = Order::query()->with(['items', 'history'])->findOrFail($id);
-        $target = $status;
 
-        if ($order->status === $target) {
-            return back()->with('flash', "Заказ уже в статусе {$target->value}, событие не отправлено.");
+        if ($order->status === $status) {
+            return back()->with('flash', "Заказ уже в статусе {$status->value}, событие не отправлено.");
         }
 
         return $this->done(
-            $this->sender->send($this->events->transition($order, $target)),
+            $this->sender->send($this->events->transition($order, $status)),
             route('admin.orders.show', $id),
-            "Событие order.{$target->value}",
+            "Событие order.{$status->value}",
         );
     }
 

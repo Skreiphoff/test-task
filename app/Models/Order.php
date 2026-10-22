@@ -6,11 +6,37 @@ namespace App\Models;
 
 use App\DTO\ListOrdersQueryDto;
 use App\Enums\OrderStatusEnum;
+use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-/** `created_at` and `updated_at` are marketplace timestamps, not local row timestamps. */
+/**
+ * `created_at` and `updated_at` are marketplace timestamps, not local row timestamps.
+ *
+ * @property string $id
+ * @property string $number
+ * @property OrderStatusEnum $status
+ * @property string $currency
+ * @property string $customer_email
+ * @property string $customer_name
+ * @property ?string $customer_phone
+ * @property string $delivery_price
+ * @property string $discount
+ * @property string $total
+ * @property ?string $shipment_carrier
+ * @property ?string $shipment_tracking_number
+ * @property ?string $shipment_tracking_url
+ * @property ?CarbonInterface $paid_at
+ * @property ?CarbonInterface $cancelled_at
+ * @property ?string $cancel_reason
+ * @property CarbonInterface $created_at
+ * @property CarbonInterface $updated_at
+ * @property-read Collection<int, OrderItem> $items
+ * @property-read Collection<int, OrderStatusHistory> $history
+ */
 class Order extends Model
 {
     public $incrementing = false;
@@ -32,13 +58,11 @@ class Order extends Model
         ];
     }
 
-    /**
-     * @param  Builder<Order>  $query
-     * @return Builder<Order>
-     */
-    public function scopeFiltered(Builder $query, ListOrdersQueryDto $filters): Builder
+    /** @param  Builder<Order>  $query */
+    #[Scope]
+    protected function filtered(Builder $query, ListOrdersQueryDto $filters): void
     {
-        return $query
+        $query
             ->when($filters->status, fn (Builder $q, OrderStatusEnum $status) => $q->where('status', $status))
             ->when($filters->email, fn (Builder $q, string $email) => $q->whereRaw('LOWER(customer_email) = ?', [$email]))
             ->orderByDesc('created_at')

@@ -8,10 +8,8 @@ if [ "$1" = "php-fpm" ]; then
     [ -f .env ] || cp .env.example .env
     composer install --no-interaction --prefer-dist
     grep -q '^APP_KEY=.\+' .env || php artisan key:generate --force
+    mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache
     php artisan migrate --force
-    mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs
-    chown -R www-data:www-data storage bootstrap/cache
-    touch /tmp/ready
 fi
 
 exec "$@"

@@ -28,6 +28,16 @@ docker compose up -d --build --wait
 
 Сервисы: `app` (php-fpm), `web` (nginx), `queue` (воркер очереди), `db` (PostgreSQL), `mailpit`.
 
+Контейнеры rootless: ни один процесс не работает от root (`app`/`queue` — пользователь `app`, `web` — `nginx-unprivileged`
+на порту 8080 внутри, `db` — `postgres`, `mailpit` — `nobody`), у всех `cap_drop: ALL` и `no-new-privileges`.
+На Linux, чтобы файлы проекта принадлежали вам, передайте свой UID при сборке:
+`APP_UID=$(id -u) docker compose up -d --build --wait` (на macOS подходит значение по умолчанию 1000).
+Если каталоги `storage` и `bootstrap/cache` остались от запуска под root, один раз выполните
+`sudo chown -R $(id -u):$(id -g) storage bootstrap/cache`.
+
+Скрипт `docker/init-testing-db.sql` создаёт тестовую БД `app_testing` только при первом создании тома; если том
+создан раньше, выполните `docker compose down -v`.
+
 Секрет подписи вебхуков — переменная `MARKETPLACE_WEBHOOK_SECRET` (в `.env.example` стоит тестовый
 `whsec_test_5f1d8c2a9b` из примера подписи). Допустимый сдвиг timestamp — `MARKETPLACE_WEBHOOK_TOLERANCE`, 300 с.
 
