@@ -55,7 +55,6 @@ class OrdersApiTest extends TestCase
 
         $data = $this->getJson('/api/orders/ord_7Q2KX9M4')->json('data');
 
-        // Source: 2026-10-21T13:02:11+03:00
         $this->assertSame(
             strtotime('2026-10-21T13:02:11+03:00'),
             strtotime($data['created_at']),

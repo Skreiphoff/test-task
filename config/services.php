@@ -30,7 +30,6 @@ return [
 
     'marketplace' => [
         'webhook_secret' => env('MARKETPLACE_WEBHOOK_SECRET'),
-        // Max allowed clock skew (seconds) between the sender timestamp and now.
         'webhook_tolerance' => (int) env('MARKETPLACE_WEBHOOK_TOLERANCE', 300),
     ],
 

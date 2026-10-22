@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\NotificationKind;
+use App\Enums\NotificationKindEnum;
 use Illuminate\Database\Eloquent\Model;
 
 class OrderNotification extends Model
@@ -16,7 +16,7 @@ class OrderNotification extends Model
     protected function casts(): array
     {
         return [
-            'kind' => NotificationKind::class,
+            'kind' => NotificationKindEnum::class,
             'claimed_at' => 'datetime',
         ];
     }

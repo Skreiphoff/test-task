@@ -27,7 +27,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    command: php artisan queue:work --tries=3 --sleep=1
+    command: php artisan queue:work --sleep=1
+    user: www-data
+    restart: unless-stopped
     volumes:
       - .:/var/www/html
     depends_on:
@@ -49,7 +51,7 @@ services:
       retries: 20
 
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.31.6
     ports:
       - "${MAILPIT_PORT:-8025}:8025"
 

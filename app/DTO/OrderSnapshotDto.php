@@ -2,27 +2,22 @@
 
 declare(strict_types=1);
 
-namespace App\Services\Marketplace;
+namespace App\DTO;
 
-use App\Enums\OrderStatus;
+use App\Enums\OrderStatusEnum;
 use Carbon\CarbonImmutable;
 use Illuminate\Validation\Rule;
 
-/**
- * Validated full order snapshot from a MarketHub webhook (data.order).
- */
-final readonly class OrderSnapshot
+final readonly class OrderSnapshotDto
 {
-    private const MONEY = '/^-?\d+\.\d{2}$/';
+    // Fits decimal(12,2); a larger value would be a database overflow, i.e. a retried 500.
+    private const MONEY = '/^-?\d{1,10}\.\d{2}$/';
 
-    /**
-     * @param list<array{sku: string, name: string, quantity: int, price: string}> $items
-     * @param array{carrier: ?string, tracking_number: ?string, tracking_url: ?string}|null $shipment
-     */
+    /** @param list<OrderItemDto> $items */
     public function __construct(
         public string $id,
         public string $number,
-        public OrderStatus $status,
+        public OrderStatusEnum $status,
         public string $currency,
         public string $customerEmail,
         public string $customerName,
@@ -31,7 +26,7 @@ final readonly class OrderSnapshot
         public string $deliveryPrice,
         public string $discount,
         public string $total,
-        public ?array $shipment,
+        public ?ShipmentDto $shipment,
         public ?CarbonImmutable $paidAt,
         public ?CarbonImmutable $cancelledAt,
         public ?string $cancelReason,
@@ -40,21 +35,21 @@ final readonly class OrderSnapshot
     ) {}
 
     /** @return array<string, mixed> */
-    public static function rules(): array
+    public static function rules(string $prefix = ''): array
     {
-        return [
+        $rules = [
             'id' => ['required', 'string', 'max:255'],
             'number' => ['required', 'string', 'max:255'],
-            'status' => ['required', Rule::enum(OrderStatus::class)],
+            'status' => ['required', Rule::enum(OrderStatusEnum::class)],
             'currency' => ['required', 'string', 'size:3'],
             'customer' => ['required', 'array'],
             'customer.email' => ['required', 'string', 'max:255'],
             'customer.name' => ['required', 'string', 'max:255'],
             'customer.phone' => ['nullable', 'string', 'max:255'],
-            'items' => ['present', 'array'],
+            'items' => ['present', 'array', 'max:500'],
             'items.*.sku' => ['required', 'string', 'max:255'],
             'items.*.name' => ['required', 'string', 'max:255'],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
             'items.*.price' => ['required', 'string', 'regex:'.self::MONEY],
             'delivery_price' => ['required', 'string', 'regex:'.self::MONEY],
             'discount' => ['required', 'string', 'regex:'.self::MONEY],
@@ -62,42 +57,36 @@ final readonly class OrderSnapshot
             'shipment' => ['nullable', 'array'],
             'shipment.carrier' => ['nullable', 'string', 'max:255'],
             'shipment.tracking_number' => ['nullable', 'string', 'max:255'],
-            'shipment.tracking_url' => ['nullable', 'string', 'max:2048'],
+            'shipment.tracking_url' => ['nullable', 'url:http,https', 'max:2048'],
             'paid_at' => ['nullable', 'date'],
             'cancelled_at' => ['nullable', 'date'],
             'cancel_reason' => ['nullable', 'string', 'max:1000'],
             'created_at' => ['required', 'date'],
             'updated_at' => ['required', 'date'],
         ];
+
+        return array_combine(
+            array_map(fn (string $key): string => $prefix.$key, array_keys($rules)),
+            $rules,
+        );
     }
 
     /** @param array<string, mixed> $data validated according to {@see rules()} */
     public static function fromValidated(array $data): self
     {
-        $shipment = $data['shipment'] ?? null;
-
         return new self(
             id: $data['id'],
             number: $data['number'],
-            status: OrderStatus::from($data['status']),
+            status: OrderStatusEnum::from($data['status']),
             currency: $data['currency'],
             customerEmail: $data['customer']['email'],
             customerName: $data['customer']['name'],
             customerPhone: $data['customer']['phone'] ?? null,
-            items: array_values(array_map(fn (array $item): array => [
-                'sku' => $item['sku'],
-                'name' => $item['name'],
-                'quantity' => (int) $item['quantity'],
-                'price' => $item['price'],
-            ], $data['items'])),
+            items: array_values(array_map(OrderItemDto::fromValidated(...), $data['items'])),
             deliveryPrice: $data['delivery_price'],
             discount: $data['discount'],
             total: $data['total'],
-            shipment: $shipment === null ? null : [
-                'carrier' => $shipment['carrier'] ?? null,
-                'tracking_number' => $shipment['tracking_number'] ?? null,
-                'tracking_url' => $shipment['tracking_url'] ?? null,
-            ],
+            shipment: isset($data['shipment']) ? ShipmentDto::fromValidated($data['shipment']) : null,
             paidAt: self::instant($data['paid_at'] ?? null),
             cancelledAt: self::instant($data['cancelled_at'] ?? null),
             cancelReason: $data['cancel_reason'] ?? null,
@@ -107,8 +96,7 @@ final readonly class OrderSnapshot
     }
 
     /**
-     * Columns of the `orders` table. Dates are UTC instants: the original offset
-     * is irrelevant for the API contract, which only requires the same instant.
+     * Dates are normalized to UTC: the contract only requires the same instant, not the original offset.
      *
      * @return array<string, mixed>
      */
@@ -124,9 +112,9 @@ final readonly class OrderSnapshot
             'delivery_price' => $this->deliveryPrice,
             'discount' => $this->discount,
             'total' => $this->total,
-            'shipment_carrier' => $this->shipment['carrier'] ?? null,
-            'shipment_tracking_number' => $this->shipment['tracking_number'] ?? null,
-            'shipment_tracking_url' => $this->shipment['tracking_url'] ?? null,
+            'shipment_carrier' => $this->shipment?->carrier,
+            'shipment_tracking_number' => $this->shipment?->trackingNumber,
+            'shipment_tracking_url' => $this->shipment?->trackingUrl,
             'paid_at' => $this->paidAt,
             'cancelled_at' => $this->cancelledAt,
             'cancel_reason' => $this->cancelReason,
@@ -135,13 +123,12 @@ final readonly class OrderSnapshot
         ];
     }
 
-    /** When the order entered its current status, according to the snapshot. */
     public function transitionTime(): CarbonImmutable
     {
         return match ($this->status) {
-            OrderStatus::Created => $this->createdAt,
-            OrderStatus::Paid => $this->paidAt ?? $this->updatedAt,
-            OrderStatus::Cancelled => $this->cancelledAt ?? $this->updatedAt,
+            OrderStatusEnum::Created => $this->createdAt,
+            OrderStatusEnum::Paid => $this->paidAt ?? $this->updatedAt,
+            OrderStatusEnum::Cancelled => $this->cancelledAt ?? $this->updatedAt,
             default => $this->updatedAt,
         };
     }

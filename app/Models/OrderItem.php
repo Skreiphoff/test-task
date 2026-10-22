@@ -24,7 +24,6 @@ class OrderItem extends Model
         return $this->belongsTo(Order::class);
     }
 
-    /** price * quantity as a 2-decimal string, computed without floats. */
     public function subtotal(): string
     {
         return bcmul((string) $this->price, (string) $this->quantity, 2);

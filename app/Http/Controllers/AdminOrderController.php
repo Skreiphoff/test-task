@@ -4,28 +4,25 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Enums\OrderStatus;
+use App\Enums\OrderStatusEnum;
 use App\Http\Requests\ListOrdersRequest;
 use App\Models\Order;
 use Illuminate\Contracts\View\View;
 
-/**
- * Minimal read-only admin pages for manual testing; the JSON API stays the contract.
- */
 class AdminOrderController extends Controller
 {
     public function index(ListOrdersRequest $request): View
     {
-        $orders = Order::query()
-            ->filtered($request->validated('status'), $request->validated('email'))
-            ->paginate((int) $request->validated('per_page', 20))
-            ->withQueryString();
+        $query = $request->toDto();
 
         return view('admin.orders.index', [
-            'orders' => $orders,
-            'statuses' => OrderStatus::cases(),
-            'status' => $request->validated('status'),
-            'email' => $request->validated('email'),
+            'orders' => Order::query()
+                ->filtered($query)
+                ->paginate($query->perPage, page: $query->page)
+                ->withQueryString(),
+            'statuses' => OrderStatusEnum::cases(),
+            'status' => $query->status?->value,
+            'email' => $query->email,
         ]);
     }
 

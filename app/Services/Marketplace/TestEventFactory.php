@@ -4,15 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services\Marketplace;
 
-use App\Enums\OrderStatus;
+use App\Enums\OrderStatusEnum;
 use App\Models\Order;
 use App\Models\WebhookEvent;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 
-/**
- * Builds MarketHub-shaped events for the admin test tools. Only used to exercise the real webhook path.
- */
 class TestEventFactory
 {
     private const CATALOG = [
@@ -43,7 +40,7 @@ class TestEventFactory
         return $this->envelope('order.created', [
             'id' => "ord_{$suffix}",
             'number' => 'MH-'.random_int(1000000, 9999999),
-            'status' => OrderStatus::Created->value,
+            'status' => OrderStatusEnum::Created->value,
             'currency' => 'RUB',
             'customer' => [
                 'email' => 'test.'.Str::lower($suffix).'@example.com',
@@ -64,7 +61,7 @@ class TestEventFactory
     }
 
     /** @return array<string, mixed> */
-    public function transition(Order $order, OrderStatus $target): array
+    public function transition(Order $order, OrderStatusEnum $target): array
     {
         $at = $this->nextInstant($order);
         $snapshot = $this->snapshot($order);
@@ -73,13 +70,13 @@ class TestEventFactory
 
         match ($target) {
             // `??=`: keep facts that already happened, e.g. the original payment time after a rollback.
-            OrderStatus::Paid => $snapshot['paid_at'] ??= $at->toIso8601String(),
-            OrderStatus::Shipped => $snapshot['shipment'] ??= [
+            OrderStatusEnum::Paid => $snapshot['paid_at'] ??= $at->toIso8601String(),
+            OrderStatusEnum::Shipped => $snapshot['shipment'] ??= [
                 'carrier' => 'СДЭК',
                 'tracking_number' => (string) random_int(1000000000, 1999999999),
                 'tracking_url' => 'https://www.cdek.ru/ru/tracking',
             ],
-            OrderStatus::Cancelled => [
+            OrderStatusEnum::Cancelled => [
                 $snapshot['cancelled_at'] ??= $at->toIso8601String(),
                 $snapshot['cancel_reason'] ??= 'Тест: отмена из админки',
             ],
@@ -89,11 +86,7 @@ class TestEventFactory
         return $this->envelope('order.'.$target->value, $snapshot);
     }
 
-    /**
-     * The most recent event received for the order, resent with the same id (a MarketHub retry).
-     *
-     * @return array<string, mixed>|null
-     */
+    /** @return array<string, mixed>|null */
     public function duplicateOfLast(Order $order): ?array
     {
         return WebhookEvent::query()
@@ -102,15 +95,11 @@ class TestEventFactory
             ->first()?->payload;
     }
 
-    /**
-     * A snapshot that is older than the stored state, delivered late under a new event id.
-     *
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     public function stale(Order $order): array
     {
         $snapshot = $this->snapshot($order);
-        $snapshot['status'] = OrderStatus::Created->value;
+        $snapshot['status'] = OrderStatusEnum::Created->value;
         $snapshot['updated_at'] = $order->updated_at->utc()->subHour()->toIso8601String();
 
         return $this->envelope('order.updated', $snapshot);
@@ -151,7 +140,7 @@ class TestEventFactory
         ];
     }
 
-    /** Always later than the stored state, so the test event is not rejected as stale. */
+    /** Must be newer than the stored state, otherwise the event is rejected as stale. */
     private function nextInstant(Order $order): CarbonImmutable
     {
         $now = CarbonImmutable::now()->utc()->startOfSecond();
@@ -161,7 +150,7 @@ class TestEventFactory
     }
 
     /**
-     * @param array<string, mixed> $order
+     * @param  array<string, mixed>  $order
      * @return array<string, mixed>
      */
     private function envelope(string $type, array $order): array

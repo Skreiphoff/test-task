@@ -15,7 +15,7 @@ return new class extends Migration
             // MarketHub order id (ord_...), used as the primary key.
             $table->string('id')->primary();
             $table->string('number');
-            $table->string('status')->index();
+            $table->string('status');
             $table->string('currency', 3);
 
             $table->string('customer_email');
@@ -38,6 +38,8 @@ return new class extends Migration
             $table->timestampTz('created_at')->index();
             $table->timestampTz('updated_at');
         });
+
+        DB::statement('CREATE INDEX orders_status_created_at_index ON orders (status, created_at DESC)');
 
         // Case-insensitive email filter.
         DB::statement('CREATE INDEX orders_customer_email_lower_index ON orders (LOWER(customer_email))');

@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\OrderStatus;
+use App\DTO\ListOrdersQueryDto;
+use App\Enums\OrderStatusEnum;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-/**
- * Current state of a MarketHub order. `created_at` and `updated_at` are marketplace timestamps.
- * Money columns are decimal strings and must never be cast to float.
- */
+/** `created_at` and `updated_at` are marketplace timestamps, not local row timestamps. */
 class Order extends Model
 {
     public $incrementing = false;
@@ -26,7 +24,7 @@ class Order extends Model
     protected function casts(): array
     {
         return [
-            'status' => OrderStatus::class,
+            'status' => OrderStatusEnum::class,
             'paid_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'created_at' => 'datetime',
@@ -35,18 +33,16 @@ class Order extends Model
     }
 
     /**
-     * Shared by the JSON API and the admin pages: optional status and case-insensitive email filters,
-     * newest first. `id` keeps the order stable for equal timestamps, so pages never overlap.
-     *
-     * @param Builder<Order> $query
+     * @param  Builder<Order>  $query
      * @return Builder<Order>
      */
-    public function scopeFiltered(Builder $query, ?string $status, ?string $email): Builder
+    public function scopeFiltered(Builder $query, ListOrdersQueryDto $filters): Builder
     {
         return $query
-            ->when($status, fn (Builder $q, string $s) => $q->where('status', $s))
-            ->when($email, fn (Builder $q, string $e) => $q->whereRaw('LOWER(customer_email) = ?', [mb_strtolower(trim($e))]))
+            ->when($filters->status, fn (Builder $q, OrderStatusEnum $status) => $q->where('status', $status))
+            ->when($filters->email, fn (Builder $q, string $email) => $q->whereRaw('LOWER(customer_email) = ?', [$email]))
             ->orderByDesc('created_at')
+            // Tie-breaker: pages must not overlap for equal timestamps.
             ->orderByDesc('id');
     }
 

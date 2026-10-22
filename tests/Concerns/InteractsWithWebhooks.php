@@ -23,7 +23,7 @@ trait InteractsWithWebhooks
     /**
      * Builds a variation of an example event.
      *
-     * @param array<string, mixed> $order overrides for data.order
+     * @param  array<string, mixed>  $order  overrides for data.order
      * @return array<string, mixed>
      */
     protected function event(string $example, array $order = [], ?string $id = null): array

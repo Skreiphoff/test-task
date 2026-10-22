@@ -8,9 +8,6 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-/**
- * Verifies the MarketHub HMAC-SHA256 signature over "{timestamp}.{raw body}".
- */
 class VerifyMarketplaceSignature
 {
     private const SIGNATURE_PREFIX = 'sha256=';
@@ -19,7 +16,7 @@ class VerifyMarketplaceSignature
     {
         $secret = (string) config('services.marketplace.webhook_secret');
         if ($secret === '') {
-            // Fail closed: never accept unsigned traffic because of a missing config.
+            // Fail closed: a missing secret must never let unsigned traffic through.
             return $this->reject('Webhook secret is not configured.', 500);
         }
 

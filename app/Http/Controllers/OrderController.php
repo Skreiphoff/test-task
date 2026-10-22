@@ -14,10 +14,10 @@ class OrderController extends Controller
 {
     public function index(ListOrdersRequest $request): AnonymousResourceCollection
     {
-        $query = Order::query()->filtered($request->validated('status'), $request->validated('email'));
+        $query = $request->toDto();
 
         return OrderListItemResource::collection(
-            $query->paginate((int) $request->validated('per_page', 20)),
+            Order::query()->filtered($query)->paginate($query->perPage, page: $query->page),
         );
     }
 

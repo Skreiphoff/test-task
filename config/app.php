@@ -67,8 +67,10 @@ return [
 
     'timezone' => 'UTC',
 
-    // Admin buttons that send signed test events through the webhook. Keep off in production.
-    'admin_test_tools' => (bool) env('ADMIN_TEST_TOOLS', false),
+    // Test buttons in the admin: on only with the flag AND debug AND a non-production environment.
+    'admin_test_tools' => (bool) env('ADMIN_TEST_TOOLS', false)
+        && (bool) env('APP_DEBUG', false)
+        && env('APP_ENV', 'production') !== 'production',
 
     /*
     |--------------------------------------------------------------------------

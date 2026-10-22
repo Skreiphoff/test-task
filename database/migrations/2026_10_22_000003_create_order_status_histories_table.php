@@ -15,9 +15,7 @@ return new class extends Migration
             $table->string('order_id');
             $table->foreign('order_id')->references('id')->on('orders')->cascadeOnDelete();
             $table->string('status');
-            // Time of the transition according to MarketHub data.
             $table->timestampTz('at');
-            // Event that caused the transition.
             $table->string('event_id');
             $table->index(['order_id', 'at']);
         });

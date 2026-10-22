@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mail;
 
-use App\Enums\NotificationKind;
+use App\Enums\NotificationKindEnum;
 use App\Models\Order;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -14,7 +14,7 @@ class OrderNotificationMail extends Mailable
 {
     public function __construct(
         public readonly Order $order,
-        public readonly NotificationKind $kind,
+        public readonly NotificationKindEnum $kind,
     ) {}
 
     public function envelope(): Envelope
@@ -22,9 +22,9 @@ class OrderNotificationMail extends Mailable
         $number = $this->order->number;
 
         return new Envelope(subject: match ($this->kind) {
-            NotificationKind::Paid => "Заказ №{$number} оплачен",
-            NotificationKind::Shipped => "Заказ №{$number} передан в доставку",
-            NotificationKind::Cancelled => "Заказ №{$number} отменён",
+            NotificationKindEnum::Paid => "Заказ №{$number} оплачен",
+            NotificationKindEnum::Shipped => "Заказ №{$number} передан в доставку",
+            NotificationKindEnum::Cancelled => "Заказ №{$number} отменён",
         });
     }
 

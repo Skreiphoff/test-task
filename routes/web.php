@@ -1,12 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Http\Controllers\AdminOrderController;
 use App\Http\Controllers\AdminTestToolsController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::redirect('/', '/admin/orders');
 
 Route::prefix('admin')->name('admin.')->group(function () {
     Route::get('/', fn () => redirect()->route('admin.orders.index'));

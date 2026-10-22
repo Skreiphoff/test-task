@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Enums\OrderStatus;
+use App\DTO\WebhookResultDto;
+use App\Enums\OrderStatusEnum;
 use App\Models\Order;
 use App\Services\Marketplace\TestEventFactory;
 use App\Services\Marketplace\TestWebhookSender;
 use Illuminate\Http\RedirectResponse;
 
-/**
- * Buttons for manual testing of the webhook pipeline. Registered only when ADMIN_TEST_TOOLS is on.
- */
 class AdminTestToolsController extends Controller
 {
     public function __construct(
@@ -28,10 +26,10 @@ class AdminTestToolsController extends Controller
         return $this->done($result, route('admin.orders.show', $event['data']['order']['id']));
     }
 
-    public function transition(string $id, string $status): RedirectResponse
+    public function transition(string $id, OrderStatusEnum $status): RedirectResponse
     {
         $order = Order::query()->with(['items', 'history'])->findOrFail($id);
-        $target = OrderStatus::tryFrom($status) ?? abort(404);
+        $target = $status;
 
         if ($order->status === $target) {
             return back()->with('flash', "Заказ уже в статусе {$target->value}, событие не отправлено.");
@@ -67,12 +65,11 @@ class AdminTestToolsController extends Controller
         );
     }
 
-    /** @param array{status: int, body: array<string, mixed>} $result */
-    private function done(array $result, string $to, string $label = 'Создан тестовый заказ'): RedirectResponse
+    private function done(WebhookResultDto $result, string $to, string $label = 'Создан тестовый заказ'): RedirectResponse
     {
-        $outcome = $result['status'] === 200
-            ? 'результат: '.($result['body']['status'] ?? '?')
-            : 'ошибка HTTP '.$result['status'].': '.($result['body']['message'] ?? '');
+        $outcome = $result->isOk()
+            ? 'результат: '.($result->outcome()?->value ?? '?')
+            : 'ошибка HTTP '.$result->httpStatus.': '.($result->body['message'] ?? '');
 
         return redirect($to)->with('flash', "{$label}, {$outcome}. Письма — в Mailpit.");
     }

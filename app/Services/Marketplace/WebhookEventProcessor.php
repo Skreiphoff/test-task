@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services\Marketplace;
 
-use App\Enums\NotificationKind;
-use App\Enums\OrderStatus;
+use App\DTO\IncomingEventDto;
+use App\DTO\OrderSnapshotDto;
+use App\Enums\NotificationKindEnum;
+use App\Enums\OrderStatusEnum;
+use App\Enums\ProcessingOutcomeEnum;
 use App\Jobs\SendOrderNotification;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -15,49 +18,35 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Applies MarketHub events idempotently: duplicates, retries and out-of-order
- * delivery all end in a consistent order state.
- */
 class WebhookEventProcessor
 {
-    public const OUTCOME_APPLIED = 'applied';
-
-    public const OUTCOME_STALE = 'stale';
-
-    public const OUTCOME_IGNORED = 'ignored';
-
-    public const OUTCOME_DUPLICATE = 'duplicate';
-
-    /**
-     * @param array<string, mixed> $payload raw decoded event, kept for audit
-     */
-    public function process(string $eventId, string $type, array $payload, ?OrderSnapshot $snapshot): string
+    public function process(IncomingEventDto $event): ProcessingOutcomeEnum
     {
-        return DB::transaction(function () use ($eventId, $type, $payload, $snapshot): string {
-            // ON CONFLICT DO NOTHING: a concurrent duplicate waits for the first
-            // transaction to finish and then sees 0 inserted rows.
+        return DB::transaction(function () use ($event): ProcessingOutcomeEnum {
+            // A concurrent duplicate waits for the first transaction and then inserts 0 rows.
             $inserted = DB::table('webhook_events')->insertOrIgnore([
-                'id' => $eventId,
-                'type' => $type,
-                'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
+                'id' => $event->id,
+                'type' => $event->type,
+                'payload' => json_encode($event->payload, JSON_THROW_ON_ERROR),
                 'outcome' => 'pending',
                 'received_at' => now()->toIso8601String(),
             ]);
 
             if ($inserted === 0) {
-                return self::OUTCOME_DUPLICATE;
+                return ProcessingOutcomeEnum::Duplicate;
             }
 
-            $outcome = $snapshot === null ? self::OUTCOME_IGNORED : $this->apply($eventId, $snapshot);
+            $outcome = $event->snapshot === null
+                ? ProcessingOutcomeEnum::Ignored
+                : $this->apply($event->id, $event->snapshot);
 
-            WebhookEvent::query()->whereKey($eventId)->update(['outcome' => $outcome]);
+            WebhookEvent::query()->whereKey($event->id)->update(['outcome' => $outcome->value]);
 
             return $outcome;
         });
     }
 
-    private function apply(string $eventId, OrderSnapshot $snapshot): string
+    private function apply(string $eventId, OrderSnapshotDto $snapshot): ProcessingOutcomeEnum
     {
         $order = Order::query()->lockForUpdate()->find($snapshot->id);
 
@@ -71,15 +60,15 @@ class WebhookEventProcessor
                 $this->recordInitialHistory($eventId, $snapshot);
                 $this->notify($snapshot);
 
-                return self::OUTCOME_APPLIED;
+                return ProcessingOutcomeEnum::Applied;
             }
 
-            // Another transaction created the order first; it has committed by now.
+            // Lost the creation race; the other transaction has committed.
             $order = Order::query()->lockForUpdate()->findOrFail($snapshot->id);
         }
 
         if ($this->isStale($order, $snapshot)) {
-            return self::OUTCOME_STALE;
+            return ProcessingOutcomeEnum::Stale;
         }
 
         $previousStatus = $order->status;
@@ -97,15 +86,11 @@ class WebhookEventProcessor
             $this->notify($snapshot);
         }
 
-        return self::OUTCOME_APPLIED;
+        return ProcessingOutcomeEnum::Applied;
     }
 
-    /**
-     * `paid_at` / `cancelled_at` describe the first time the state was reached. After a
-     * manual rollback they lie in the past, so history must fall back to `updated_at`
-     * to stay chronological.
-     */
-    private function transitionTime(Order $order, OrderSnapshot $snapshot): CarbonInterface
+    /** After a manual rollback `paid_at` lies in the past; fall back to `updated_at` to keep history chronological. */
+    private function transitionTime(Order $order, OrderSnapshotDto $snapshot): CarbonInterface
     {
         $at = $snapshot->transitionTime();
         $lastEntry = $order->history()->reorder()->max('at');
@@ -114,11 +99,10 @@ class WebhookEventProcessor
     }
 
     /**
-     * Newer `updated_at` wins. Status rank is deliberately not used across different
-     * seconds because MarketHub support may roll a status back manually. Within the
-     * same second (timestamps have second precision) a snapshot must not regress the status.
+     * Rank is ignored across different seconds because support may roll a status back manually;
+     * within the same second (the timestamp precision) a snapshot must not regress the status.
      */
-    private function isStale(Order $order, OrderSnapshot $snapshot): bool
+    private function isStale(Order $order, OrderSnapshotDto $snapshot): bool
     {
         $comparison = $snapshot->updatedAt <=> $order->updated_at;
 
@@ -129,24 +113,31 @@ class WebhookEventProcessor
         return self::rank($snapshot->status) < self::rank($order->status);
     }
 
-    private static function rank(OrderStatus $status): int
+    private static function rank(OrderStatusEnum $status): int
     {
         return match ($status) {
-            OrderStatus::Created => 0,
-            OrderStatus::Paid => 1,
-            OrderStatus::Shipped => 2,
-            OrderStatus::Delivered => 3,
-            OrderStatus::Cancelled => 4,
+            OrderStatusEnum::Created => 0,
+            OrderStatusEnum::Paid => 1,
+            OrderStatusEnum::Shipped => 2,
+            OrderStatusEnum::Delivered => 3,
+            OrderStatusEnum::Cancelled => 4,
         };
     }
 
-    private function replaceItems(OrderSnapshot $snapshot): void
+    private function replaceItems(OrderSnapshotDto $snapshot): void
     {
         OrderItem::query()->where('order_id', $snapshot->id)->delete();
 
         $rows = [];
         foreach ($snapshot->items as $position => $item) {
-            $rows[] = ['order_id' => $snapshot->id, 'position' => $position, ...$item];
+            $rows[] = [
+                'order_id' => $snapshot->id,
+                'position' => $position,
+                'sku' => $item->sku,
+                'name' => $item->name,
+                'quantity' => $item->quantity,
+                'price' => $item->price,
+            ];
         }
 
         if ($rows !== []) {
@@ -154,16 +145,13 @@ class WebhookEventProcessor
         }
     }
 
-    /**
-     * An order first seen in a later status (events arrived out of order) still
-     * gets the transitions that the snapshot proves: creation and payment.
-     */
-    private function recordInitialHistory(string $eventId, OrderSnapshot $snapshot): void
+    /** An order first seen in a later status still gets the transitions the snapshot proves. */
+    private function recordInitialHistory(string $eventId, OrderSnapshotDto $snapshot): void
     {
-        $entries = [OrderStatus::Created->value => $snapshot->createdAt];
+        $entries = [OrderStatusEnum::Created->value => $snapshot->createdAt];
 
         if ($snapshot->paidAt !== null) {
-            $entries[OrderStatus::Paid->value] = $snapshot->paidAt;
+            $entries[OrderStatusEnum::Paid->value] = $snapshot->paidAt;
         }
 
         $entries[$snapshot->status->value] ??= $snapshot->transitionTime();
@@ -178,17 +166,27 @@ class WebhookEventProcessor
         }
     }
 
-    private function notify(OrderSnapshot $snapshot): void
+    /**
+     * A snapshot with `paid_at` proves the payment even if its own event was lost or arrived late,
+     * so "paid" is sent together with the email of the current status. The unique
+     * (order_id, kind) row keeps each kind at one email.
+     */
+    private function notify(OrderSnapshotDto $snapshot): void
     {
-        $kind = NotificationKind::forStatus($snapshot->status);
+        $kinds = array_filter([
+            $snapshot->paidAt !== null ? NotificationKindEnum::Paid : null,
+            NotificationKindEnum::forStatus($snapshot->status),
+        ]);
 
-        if ($kind !== null) {
-            SendOrderNotification::dispatch($snapshot->id, $kind);
+        foreach (array_unique($kinds, SORT_REGULAR) as $kind) {
+            if (in_array($snapshot->status, $kind->validStatuses(), true)) {
+                SendOrderNotification::dispatch($snapshot->id, $kind);
+            }
         }
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      * @return array<string, mixed>
      */
     private function serialize(array $attributes): array

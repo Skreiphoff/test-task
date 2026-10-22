@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
-use App\Enums\OrderStatus;
+use App\Enums\OrderStatusEnum;
 use App\Models\Order;
 use App\Models\WebhookEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -28,7 +28,7 @@ class AdminTestToolsTest extends TestCase
 
         $order = Order::query()->firstOrFail();
         $response->assertRedirect(route('admin.orders.show', $order->id));
-        $this->assertSame(OrderStatus::Created, $order->status);
+        $this->assertSame(OrderStatusEnum::Created, $order->status);
         $this->assertGreaterThan(0, $order->items()->count());
     }
 
@@ -43,7 +43,7 @@ class AdminTestToolsTest extends TestCase
         }
 
         $order = Order::query()->findOrFail($id);
-        $this->assertSame(OrderStatus::Delivered, $order->status);
+        $this->assertSame(OrderStatusEnum::Delivered, $order->status);
         $this->assertSame(
             ['created', 'paid', 'shipped', 'delivered'],
             $order->history->map(fn ($h) => $h->status->value)->all(),
@@ -61,7 +61,7 @@ class AdminTestToolsTest extends TestCase
         $this->post("/admin/test/orders/{$id}/stale")
             ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'результат: stale'));
 
-        $this->assertSame(OrderStatus::Paid, Order::query()->findOrFail($id)->status);
+        $this->assertSame(OrderStatusEnum::Paid, Order::query()->findOrFail($id)->status);
     }
 
     public function test_pressing_the_current_status_sends_nothing_and_changes_nothing(): void

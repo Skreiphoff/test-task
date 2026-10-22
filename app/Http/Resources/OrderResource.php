@@ -14,7 +14,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class OrderResource extends JsonResource
 {
     /**
-     * Every key is always present: nullable fields are emitted as null, never omitted.
+     * Nullable fields are always emitted as null, never omitted: the contract lists them as required.
      *
      * @return array<string, mixed>
      */

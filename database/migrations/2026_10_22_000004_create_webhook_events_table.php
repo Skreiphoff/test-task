@@ -11,11 +11,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('webhook_events', function (Blueprint $table) {
-            // MarketHub event id: the idempotency key.
+            // The idempotency key.
             $table->string('id')->primary();
             $table->string('type');
             $table->jsonb('payload');
-            // applied | stale | ignored
+            // pending while processing, then applied | stale | ignored
             $table->string('outcome');
             $table->timestampTz('received_at');
         });
