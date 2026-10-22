@@ -6,11 +6,11 @@ namespace App\Enums;
 
 enum ProcessingOutcomeEnum: string
 {
+    case Pending = 'pending';
+
     case Applied = 'applied';
 
     case Stale = 'stale';
 
     case Ignored = 'ignored';
-
-    case Duplicate = 'duplicate';
 }

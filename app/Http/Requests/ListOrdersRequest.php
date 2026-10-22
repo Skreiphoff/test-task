@@ -11,6 +11,12 @@ use Illuminate\Validation\Rule;
 
 class ListOrdersRequest extends FormRequest
 {
+    /** Used for the HTML admin; the JSON API answers 422 and never redirects. */
+    protected function getRedirectUrl(): string
+    {
+        return route('admin.orders.index');
+    }
+
     public function toDto(): ListOrdersQueryDto
     {
         return ListOrdersQueryDto::fromValidated($this->validated());

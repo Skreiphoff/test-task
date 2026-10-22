@@ -6,6 +6,7 @@ namespace App\DTO;
 
 use App\Enums\OrderStatusEnum;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 final readonly class OrderSnapshotDto
@@ -62,13 +63,20 @@ final readonly class OrderSnapshotDto
             'cancelled_at' => ['nullable', 'date'],
             'cancel_reason' => ['nullable', 'string', 'max:1000'],
             'created_at' => ['required', 'date'],
-            'updated_at' => ['required', 'date'],
+            // Not in the future: one snapshot dated far ahead would make every later event "stale" and freeze the order.
+            'updated_at' => ['required', 'date', 'before:+1 day'],
         ];
 
         return array_combine(
             array_map(fn (string $key): string => $prefix.$key, array_keys($rules)),
             $rules,
         );
+    }
+
+    /** @param array<string, mixed> $order the `data.order` of an event that was validated when it was received */
+    public static function fromPayload(array $order): self
+    {
+        return self::fromValidated(Validator::make($order, self::rules())->validate());
     }
 
     /** @param array<string, mixed> $data validated according to {@see rules()} */

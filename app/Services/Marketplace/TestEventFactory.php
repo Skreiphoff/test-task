@@ -94,7 +94,7 @@ class TestEventFactory
     public function duplicateOfLast(Order $order): ?array
     {
         return WebhookEvent::query()
-            ->where('payload->data->order->id', $order->id)
+            ->where('order_id', $order->id)
             ->orderByDesc('received_at')
             ->first()?->payload;
     }

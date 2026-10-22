@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property NotificationStatusEnum $status
  * @property int $attempts
  * @property ?string $last_error
+ * @property ?CarbonInterface $locked_until
  * @property CarbonInterface $created_at
  * @property ?CarbonInterface $processed_at
  */
@@ -31,6 +32,7 @@ class OrderNotification extends Model
             'kind' => NotificationKindEnum::class,
             'status' => NotificationStatusEnum::class,
             'attempts' => 'integer',
+            'locked_until' => 'datetime',
             'created_at' => 'datetime',
             'processed_at' => 'datetime',
         ];

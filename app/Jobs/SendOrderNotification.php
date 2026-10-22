@@ -28,6 +28,7 @@ class SendOrderNotification implements ShouldQueue
         public readonly string $orderId,
         public readonly NotificationKindEnum $kind,
     ) {
+        $this->onQueue('mail');
         $this->afterCommit();
     }
 

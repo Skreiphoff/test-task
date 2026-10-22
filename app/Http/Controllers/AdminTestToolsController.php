@@ -23,7 +23,12 @@ class AdminTestToolsController extends Controller
         $event = $this->events->newOrder();
         $result = $this->sender->send($event);
 
-        return $this->done($result, route('admin.orders.show', $event['data']['order']['id']));
+        // The order is created by the worker, so its card may not exist yet.
+        $orderId = $event['data']['order']['id'];
+
+        return $this->done($result, Order::query()->whereKey($orderId)->exists()
+            ? route('admin.orders.show', $orderId)
+            : route('admin.orders.index'));
     }
 
     public function transition(string $id, OrderStatusEnum $status): RedirectResponse
@@ -32,6 +37,10 @@ class AdminTestToolsController extends Controller
 
         if ($order->status === $status) {
             return back()->with('flash', "Заказ уже в статусе {$status->value}, событие не отправлено.");
+        }
+
+        if (! in_array($status, $order->status->nextStatuses(), true)) {
+            return back()->with('flash', "Переход {$order->status->value} → {$status->value} недопустим, событие не отправлено.");
         }
 
         return $this->done(
@@ -67,9 +76,9 @@ class AdminTestToolsController extends Controller
     private function done(WebhookResultDto $result, string $to, string $label = 'Создан тестовый заказ'): RedirectResponse
     {
         $outcome = $result->isOk()
-            ? 'результат: '.($result->outcome()?->value ?? '?')
+            ? 'ответ: '.($result->receipt()?->value ?? '?').'. Результат обработки смотрите в блоке «События» заказа'
             : 'ошибка HTTP '.$result->httpStatus.': '.($result->body['message'] ?? '');
 
-        return redirect($to)->with('flash', "{$label}, {$outcome}. Письма — в Mailpit.");
+        return redirect($to)->with('flash', "{$label}, {$outcome}.");
     }
 }

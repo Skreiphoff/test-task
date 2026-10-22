@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\DTO;
 
-use App\Enums\ProcessingOutcomeEnum;
+use App\Enums\WebhookReceiptEnum;
 
 final readonly class WebhookResultDto
 {
@@ -16,11 +16,11 @@ final readonly class WebhookResultDto
 
     public function isOk(): bool
     {
-        return $this->httpStatus === 200;
+        return $this->httpStatus >= 200 && $this->httpStatus < 300;
     }
 
-    public function outcome(): ?ProcessingOutcomeEnum
+    public function receipt(): ?WebhookReceiptEnum
     {
-        return ProcessingOutcomeEnum::tryFrom((string) ($this->body['status'] ?? ''));
+        return WebhookReceiptEnum::tryFrom((string) ($this->body['status'] ?? ''));
     }
 }

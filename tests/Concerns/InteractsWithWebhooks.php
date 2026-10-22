@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Concerns;
 
+use App\Models\WebhookEvent;
 use Illuminate\Testing\TestResponse;
 
 trait InteractsWithWebhooks
 {
     private const SECRET = 'whsec_test_5f1d8c2a9b';
+
+    private ?string $lastEventId = null;
 
     /** @return array<string, mixed> */
     protected function example(string $name): array
@@ -41,7 +44,15 @@ trait InteractsWithWebhooks
     /** @param array<string, mixed> $event */
     protected function sendEvent(array $event, ?int $timestamp = null): TestResponse
     {
+        $this->lastEventId = $event['id'];
+
         return $this->sendRaw(json_encode($event, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $event['id'], $timestamp);
+    }
+
+    /** The queue is synchronous in tests, so a received event has been processed by the time the response returns. */
+    protected function assertLastOutcome(string $expected): void
+    {
+        $this->assertSame($expected, WebhookEvent::query()->findOrFail($this->lastEventId)->outcome->value);
     }
 
     protected function sendRaw(string $body, string $eventId, ?int $timestamp = null, ?string $secret = null): TestResponse

@@ -35,7 +35,8 @@ class WebhookProcessingTest extends TestCase
     public function test_lifecycle_is_stored_with_items_history_and_emails(): void
     {
         foreach (['order-created', 'order-updated', 'order-paid', 'order-shipped'] as $example) {
-            $this->sendEvent($this->event($example))->assertOk()->assertJson(['status' => 'applied']);
+            $this->sendEvent($this->event($example))->assertAccepted();
+            $this->assertLastOutcome('applied');
         }
 
         $order = Order::query()->findOrFail(self::ORDER_ID);
@@ -54,7 +55,8 @@ class WebhookProcessingTest extends TestCase
     public function test_updated_event_replaces_items_without_status_history_or_email(): void
     {
         $this->sendEvent($this->event('order-created'));
-        $this->sendEvent($this->event('order-updated'))->assertJson(['status' => 'applied']);
+        $this->sendEvent($this->event('order-updated'))->assertAccepted();
+        $this->assertLastOutcome('applied');
 
         $this->assertSame(3, OrderItem::query()->where('sku', 'TSHIRT-BLK-M')->value('quantity'));
         $this->assertSame(1, OrderStatusHistory::query()->count());
@@ -65,7 +67,8 @@ class WebhookProcessingTest extends TestCase
     {
         $event = $this->event('order-paid');
 
-        $this->sendEvent($event, time() - 120)->assertJson(['status' => 'applied']);
+        $this->sendEvent($event, time() - 120)->assertAccepted();
+        $this->assertLastOutcome('applied');
         $this->sendEvent($event)->assertOk()->assertJson(['status' => 'duplicate']);
 
         $this->assertSame(1, WebhookEvent::query()->count());
@@ -76,8 +79,10 @@ class WebhookProcessingTest extends TestCase
     public function test_older_snapshot_arriving_late_does_not_overwrite_newer_state(): void
     {
         $this->sendEvent($this->event('order-shipped'));
-        $this->sendEvent($this->event('order-paid'))->assertOk()->assertJson(['status' => 'stale']);
-        $this->sendEvent($this->event('order-created'))->assertOk()->assertJson(['status' => 'stale']);
+        $this->sendEvent($this->event('order-paid'))->assertAccepted();
+        $this->assertLastOutcome('stale');
+        $this->sendEvent($this->event('order-created'))->assertAccepted();
+        $this->assertLastOutcome('stale');
 
         $order = Order::query()->findOrFail(self::ORDER_ID);
         $this->assertSame(OrderStatusEnum::Shipped, $order->status);
@@ -89,8 +94,8 @@ class WebhookProcessingTest extends TestCase
     {
         // 12:00+03:00 is 09:00Z, which is earlier than 10:00+00:00 although "12" > "10" as text.
         $this->sendEvent($this->event('order-updated', ['updated_at' => '2026-10-21T10:00:00+00:00', 'status' => 'created']));
-        $this->sendEvent($this->event('order-paid', ['updated_at' => '2026-10-21T12:00:00+03:00'], 'evt_late'))
-            ->assertJson(['status' => 'stale']);
+        $this->sendEvent($this->event('order-paid', ['updated_at' => '2026-10-21T12:00:00+03:00'], 'evt_late'))->assertAccepted();
+        $this->assertLastOutcome('stale');
 
         $this->assertSame(OrderStatusEnum::Created, Order::query()->findOrFail(self::ORDER_ID)->status);
     }
@@ -98,8 +103,8 @@ class WebhookProcessingTest extends TestCase
     public function test_same_second_snapshot_does_not_regress_status(): void
     {
         $this->sendEvent($this->event('order-shipped', ['updated_at' => '2026-10-22T09:00:00+03:00']));
-        $this->sendEvent($this->event('order-paid', ['updated_at' => '2026-10-22T09:00:00+03:00'], 'evt_tie'))
-            ->assertJson(['status' => 'stale']);
+        $this->sendEvent($this->event('order-paid', ['updated_at' => '2026-10-22T09:00:00+03:00'], 'evt_tie'))->assertAccepted();
+        $this->assertLastOutcome('stale');
 
         $this->assertSame(OrderStatusEnum::Shipped, Order::query()->findOrFail(self::ORDER_ID)->status);
     }
@@ -124,7 +129,8 @@ class WebhookProcessingTest extends TestCase
             'cancel_reason' => 'Передумал',
             'updated_at' => '2026-10-21T13:06:00+03:00',
         ], 'evt_cancel'));
-        $this->sendEvent($this->event('order-paid'))->assertJson(['status' => 'stale']);
+        $this->sendEvent($this->event('order-paid'))->assertAccepted();
+        $this->assertLastOutcome('stale');
 
         $this->assertSame(OrderStatusEnum::Cancelled, Order::query()->findOrFail(self::ORDER_ID)->status);
         $this->assertMailKinds([NotificationKindEnum::Cancelled]);
@@ -137,7 +143,8 @@ class WebhookProcessingTest extends TestCase
         $this->sendEvent($this->event('order-paid', [
             'updated_at' => '2026-10-23T10:00:00+03:00',
             'shipment' => null,
-        ], 'evt_rollback'))->assertJson(['status' => 'applied']);
+        ], 'evt_rollback'))->assertAccepted();
+        $this->assertLastOutcome('applied');
 
         $order = Order::query()->findOrFail(self::ORDER_ID);
         $this->assertSame(OrderStatusEnum::Paid, $order->status);
@@ -196,9 +203,11 @@ class WebhookProcessingTest extends TestCase
         $this->assertSame(0, WebhookEvent::query()->count());
     }
 
-    public function test_non_json_body_is_rejected(): void
+    public function test_non_json_body_is_rejected_with_a_clear_message(): void
     {
-        $this->sendRaw('not json', 'evt_x')->assertStatus(422);
+        $this->sendRaw('{not json', 'evt_x')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['body']);
     }
 
     /** @param list<NotificationKindEnum> $expected */

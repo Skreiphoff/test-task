@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services\Marketplace;
 
-use App\DTO\IncomingEventDto;
 use App\DTO\OrderSnapshotDto;
 use App\Enums\NotificationKindEnum;
 use App\Enums\OrderStatusEnum;
@@ -15,38 +14,41 @@ use App\Models\OrderItem;
 use App\Models\OrderStatusHistory;
 use App\Models\WebhookEvent;
 use App\Services\Notifications\NotificationOutbox;
+use App\Support\ErrorSummary;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class WebhookEventProcessor
 {
     public function __construct(private readonly NotificationOutbox $outbox) {}
 
-    public function process(IncomingEventDto $event): ProcessingOutcomeEnum
+    /** Applies a stored event. Safe to call repeatedly: only a pending event is applied, once. */
+    public function process(string $eventId): void
     {
-        return DB::transaction(function () use ($event): ProcessingOutcomeEnum {
-            // A concurrent duplicate waits for the first transaction and then inserts 0 rows.
-            $inserted = DB::table('webhook_events')->insertOrIgnore([
-                'id' => $event->id,
-                'type' => $event->type,
-                'payload' => json_encode($event->payload, JSON_THROW_ON_ERROR),
-                'outcome' => 'pending',
-                'received_at' => now()->toIso8601String(),
-            ]);
+        DB::transaction(function () use ($eventId): void {
+            $event = WebhookEvent::query()->lockForUpdate()->find($eventId);
 
-            if ($inserted === 0) {
-                return ProcessingOutcomeEnum::Duplicate;
+            if ($event === null || $event->outcome !== ProcessingOutcomeEnum::Pending) {
+                return;
             }
 
-            $outcome = $event->snapshot === null
-                ? ProcessingOutcomeEnum::Ignored
-                : $this->apply($event->id, $event->snapshot);
+            $outcome = $this->apply($event->id, OrderSnapshotDto::fromPayload($event->payload['data']['order']));
 
-            WebhookEvent::query()->whereKey($event->id)->update(['outcome' => $outcome->value]);
-
-            return $outcome;
+            $event->forceFill(['outcome' => $outcome])->save();
         });
+    }
+
+    public function recordFailure(string $eventId, Throwable $error): void
+    {
+        WebhookEvent::query()
+            ->whereKey($eventId)
+            ->where('outcome', ProcessingOutcomeEnum::Pending)
+            ->update([
+                'attempts' => DB::raw('attempts + 1'),
+                'last_error' => ErrorSummary::of($error),
+            ]);
     }
 
     private function apply(string $eventId, OrderSnapshotDto $snapshot): ProcessingOutcomeEnum

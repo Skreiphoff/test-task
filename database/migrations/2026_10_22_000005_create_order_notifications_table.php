@@ -20,6 +20,8 @@ return new class extends Migration
             $table->string('status')->default('pending');
             $table->unsignedSmallInteger('attempts')->default(0);
             $table->text('last_error')->nullable();
+            // Lease of the worker that is sending right now; an expired lease means the worker died.
+            $table->timestampTz('locked_until')->nullable();
             $table->timestampTz('created_at');
             $table->timestampTz('processed_at')->nullable();
             // At most one email of each kind per order.

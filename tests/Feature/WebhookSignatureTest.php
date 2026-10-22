@@ -27,14 +27,14 @@ class WebhookSignatureTest extends TestCase
             'HTTP_X_WEBHOOK_ID' => json_decode($body, true)['id'],
             'HTTP_X_WEBHOOK_TIMESTAMP' => '1792577149',
             'HTTP_X_WEBHOOK_SIGNATURE' => 'sha256=4d4f2d50f98596ab503d29dc96db6fda247e3c482bff130bd97353564cb163f7',
-        ], $body)->assertOk();
+        ], $body)->assertAccepted();
     }
 
     public function test_valid_signature_over_pretty_printed_body_is_accepted(): void
     {
         $body = (string) file_get_contents(base_path('task/examples/order-created.json'));
 
-        $this->sendRaw($body, json_decode($body, true)['id'])->assertOk();
+        $this->sendRaw($body, json_decode($body, true)['id'])->assertAccepted();
     }
 
     public function test_invalid_signature_is_rejected_and_nothing_is_stored(): void
@@ -68,7 +68,7 @@ class WebhookSignatureTest extends TestCase
 
         $this->sendEvent($event, time() - 301)->assertUnauthorized();
         $this->sendEvent($event, time() + 301)->assertUnauthorized();
-        $this->sendEvent($event, time() - 299)->assertOk();
+        $this->sendEvent($event, time() - 299)->assertAccepted();
     }
 
     public function test_missing_signature_headers_are_rejected(): void

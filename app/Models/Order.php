@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonInterface $updated_at
  * @property-read Collection<int, OrderItem> $items
  * @property-read Collection<int, OrderStatusHistory> $history
+ * @property-read Collection<int, WebhookEvent> $webhookEvents
  *
  * @method static OrderBuilder query()
  */
@@ -70,6 +71,12 @@ class Order extends Model
     public function history(): HasMany
     {
         return $this->hasMany(OrderStatusHistory::class)->orderBy('at')->orderBy('id');
+    }
+
+    /** @return HasMany<WebhookEvent, $this> */
+    public function webhookEvents(): HasMany
+    {
+        return $this->hasMany(WebhookEvent::class)->orderByDesc('received_at');
     }
 
     public function hasShipment(): bool

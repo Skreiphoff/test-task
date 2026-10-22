@@ -39,7 +39,7 @@ class AdminTestToolsTest extends TestCase
 
         foreach (['paid', 'shipped', 'delivered'] as $status) {
             $this->post("/admin/test/orders/{$id}/status/{$status}")
-                ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'результат: applied'));
+                ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'ответ: accepted'));
         }
 
         $order = Order::query()->findOrFail($id);
@@ -57,9 +57,10 @@ class AdminTestToolsTest extends TestCase
         $this->post("/admin/test/orders/{$id}/status/paid");
 
         $this->post("/admin/test/orders/{$id}/duplicate")
-            ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'результат: duplicate'));
+            ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'ответ: duplicate'));
         $this->post("/admin/test/orders/{$id}/stale")
-            ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'результат: stale'));
+            ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'ответ: accepted'));
+        $this->assertSame(1, WebhookEvent::query()->where('outcome', 'stale')->count());
 
         $this->assertSame(OrderStatusEnum::Paid, Order::query()->findOrFail($id)->status);
     }
@@ -79,5 +80,33 @@ class AdminTestToolsTest extends TestCase
         $this->assertEquals($before->updated_at, $after->updated_at);
         $this->assertEquals($before->paid_at, $after->paid_at);
         $this->assertSame($eventsBefore, WebhookEvent::query()->count());
+    }
+
+    public function test_only_valid_transitions_are_offered_and_accepted(): void
+    {
+        $this->post('/admin/test/orders');
+        $id = Order::query()->firstOrFail()->id;
+        $this->post("/admin/test/orders/{$id}/status/cancelled");
+
+        $this->get("/admin/orders/{$id}")->assertDontSee('status/shipped', false)->assertDontSee('status/paid', false);
+
+        $this->post("/admin/test/orders/{$id}/status/shipped")
+            ->assertSessionHas('flash', fn (string $m) => str_contains($m, 'недопустим'));
+
+        $order = Order::query()->findOrFail($id);
+        $this->assertSame(OrderStatusEnum::Cancelled, $order->status);
+        $this->assertSame(
+            ['created', 'cancelled'],
+            $order->history->map(fn ($h) => $h->status->value)->all(),
+        );
+    }
+
+    public function test_every_status_offers_its_normal_next_steps(): void
+    {
+        $this->assertSame([OrderStatusEnum::Paid, OrderStatusEnum::Cancelled], OrderStatusEnum::Created->nextStatuses());
+        $this->assertSame([OrderStatusEnum::Shipped, OrderStatusEnum::Cancelled], OrderStatusEnum::Paid->nextStatuses());
+        $this->assertSame([OrderStatusEnum::Delivered], OrderStatusEnum::Shipped->nextStatuses());
+        $this->assertSame([], OrderStatusEnum::Delivered->nextStatuses());
+        $this->assertSame([], OrderStatusEnum::Cancelled->nextStatuses());
     }
 }

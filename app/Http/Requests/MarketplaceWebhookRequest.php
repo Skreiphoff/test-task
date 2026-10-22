@@ -43,6 +43,12 @@ class MarketplaceWebhookRequest extends FormRequest
     {
         return [
             function (Validator $validator): void {
+                if ($this->payload() === []) {
+                    $validator->errors()->add('body', 'The body must be a non-empty JSON object.');
+
+                    return;
+                }
+
                 if ($this->header('X-Webhook-Id') !== ($this->payload()['id'] ?? null)) {
                     $validator->errors()->add('X-Webhook-Id', 'The header does not match the event id.');
                 }

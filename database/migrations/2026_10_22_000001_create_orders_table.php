@@ -28,11 +28,11 @@ return new class extends Migration
 
             $table->string('shipment_carrier')->nullable();
             $table->string('shipment_tracking_number')->nullable();
-            $table->string('shipment_tracking_url')->nullable();
+            $table->text('shipment_tracking_url')->nullable();
 
             $table->timestampTz('paid_at')->nullable();
             $table->timestampTz('cancelled_at')->nullable();
-            $table->string('cancel_reason')->nullable();
+            $table->text('cancel_reason')->nullable();
 
             // Marketplace timestamps (stored as UTC instants), not local row timestamps.
             $table->timestampTz('created_at')->index();

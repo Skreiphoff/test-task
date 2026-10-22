@@ -11,6 +11,9 @@ use App\Models\Order;
 use App\Models\OrderNotification;
 use App\Services\Notifications\NotificationOutbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Events\MessageSending;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Symfony\Component\Mailer\SentMessage;
@@ -115,7 +118,9 @@ class OrderNotificationTest extends TestCase
             $notification = $this->notification('ord_7Q2KX9M4', 'paid');
             $this->assertSame(NotificationStatusEnum::Pending, $notification->status);
             $this->assertSame(1, $notification->attempts);
-            $this->assertSame('smtp down', $notification->last_error);
+            $this->assertStringContainsString('RuntimeException', (string) $notification->last_error);
+            $this->assertStringNotContainsString('smtp down', (string) $notification->last_error);
+            $this->assertNull($notification->locked_until);
         }
     }
 
@@ -147,7 +152,7 @@ class OrderNotificationTest extends TestCase
         $this->notification('ord_7Q2KX9M4', 'paid')->forceFill(['created_at' => now()->subMinutes(5)])->save();
         $this->artisan('notifications:dispatch-stuck')->assertSuccessful();
 
-        Queue::assertPushed(SendOrderNotification::class, fn (SendOrderNotification $job) => $job->orderId === 'ord_7Q2KX9M4'
+        Queue::assertPushedOn('mail', SendOrderNotification::class, fn (SendOrderNotification $job) => $job->orderId === 'ord_7Q2KX9M4'
             && $job->kind === NotificationKindEnum::Paid);
     }
 
@@ -158,6 +163,56 @@ class OrderNotificationTest extends TestCase
         $this->notification('ord_7Q2KX9M4', 'paid')
             ->forceFill(['created_at' => now()->subHour(), 'attempts' => NotificationOutbox::MAX_ATTEMPTS])
             ->save();
+        Queue::fake();
+
+        $this->artisan('notifications:dispatch-stuck')->assertSuccessful();
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_the_mail_is_sent_outside_a_database_transaction(): void
+    {
+        $this->sendEvent($this->event('order-paid'));
+        $this->notification('ord_7Q2KX9M4', 'paid')->forceFill(['status' => NotificationStatusEnum::Pending])->save();
+
+        $baseline = DB::transactionLevel();
+        $during = null;
+        Event::listen(MessageSending::class, function () use (&$during): void {
+            $during = DB::transactionLevel();
+        });
+
+        $this->outbox()->deliver('ord_7Q2KX9M4', NotificationKindEnum::Paid);
+
+        $this->assertSame($baseline, $during, 'SMTP must not run inside a transaction holding the row lock.');
+        $this->assertSame(NotificationStatusEnum::Sent, $this->notification('ord_7Q2KX9M4', 'paid')->status);
+        $this->assertNull($this->notification('ord_7Q2KX9M4', 'paid')->locked_until);
+    }
+
+    public function test_a_row_with_a_live_lease_is_not_delivered_again_but_an_expired_lease_is(): void
+    {
+        $this->sendEvent($this->event('order-paid'));
+        $this->notification('ord_7Q2KX9M4', 'paid')->forceFill([
+            'status' => NotificationStatusEnum::Pending,
+            'locked_until' => now()->addSeconds(30),
+        ])->save();
+        Mail::fake();
+
+        $this->outbox()->deliver('ord_7Q2KX9M4', NotificationKindEnum::Paid);
+        Mail::assertNothingSent();
+
+        $this->notification('ord_7Q2KX9M4', 'paid')->forceFill(['locked_until' => now()->subSecond()])->save();
+        $this->outbox()->deliver('ord_7Q2KX9M4', NotificationKindEnum::Paid);
+        Mail::assertSentCount(1);
+    }
+
+    public function test_pending_rows_with_a_live_lease_are_not_considered_stuck(): void
+    {
+        $this->sendEvent($this->event('order-created'));
+        $this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid);
+        $this->notification('ord_7Q2KX9M4', 'paid')->forceFill([
+            'created_at' => now()->subHour(),
+            'locked_until' => now()->addSeconds(30),
+        ])->save();
         Queue::fake();
 
         $this->artisan('notifications:dispatch-stuck')->assertSuccessful();

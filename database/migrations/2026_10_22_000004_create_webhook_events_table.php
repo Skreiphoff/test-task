@@ -14,10 +14,15 @@ return new class extends Migration
             // The idempotency key.
             $table->string('id')->primary();
             $table->string('type');
+            // The order is created while the event is processed, so this is not a foreign key.
+            $table->string('order_id')->nullable()->index();
             $table->jsonb('payload');
-            // pending while processing, then applied | stale | ignored
-            $table->string('outcome');
+            // Inbox state: pending until a worker applies the event, then applied | stale | ignored
+            $table->string('outcome')->default('pending');
+            $table->unsignedSmallInteger('attempts')->default(0);
+            $table->text('last_error')->nullable();
             $table->timestampTz('received_at');
+            $table->index(['outcome', 'received_at']);
         });
     }
 

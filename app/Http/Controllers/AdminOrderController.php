@@ -23,13 +23,14 @@ class AdminOrderController extends Controller
             'statuses' => OrderStatusEnum::cases(),
             'status' => $query->status?->value,
             'email' => $query->email,
+            'perPage' => $query->perPage,
         ]);
     }
 
     public function show(string $id): View
     {
         return view('admin.orders.show', [
-            'order' => Order::query()->with(['items', 'history'])->findOrFail($id),
+            'order' => Order::query()->with(['items', 'history', 'webhookEvents'])->findOrFail($id),
         ]);
     }
 }

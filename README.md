@@ -19,14 +19,14 @@ docker compose up -d --build --wait
 
 | Что | Адрес |
 | --- | --- |
-| Приложение / API | http://localhost:8088 |
+| Приложение / API | http://localhost:8088 (порты слушают только `127.0.0.1`) |
 | Админка (список и карточка заказа) | http://localhost:8088/admin/orders |
 | Mailpit (письма) | http://localhost:8025 |
 
 Порты можно сменить, если заняты: `APP_PORT=9000 MAILPIT_PORT=9025 docker compose up -d --wait`
 (по умолчанию 8088 и 8025).
 
-Сервисы: `app` (php-fpm), `web` (nginx), `queue` (воркер очереди), `scheduler` (планировщик, подбирает зависшие письма из outbox), `db` (PostgreSQL), `mailpit`.
+Сервисы: `app` (php-fpm), `web` (nginx), `queue` (воркер очередей `webhooks` и `mail`), `scheduler` (планировщик, подбирает зависшие события и письма), `db` (PostgreSQL), `mailpit`.
 
 Контейнеры rootless: ни один процесс не работает от root (`app`/`queue` — пользователь `app`, `scheduler` — тоже `app`, `web` — `nginx-unprivileged`
 на порту 8080 внутри, `db` — `postgres`, `mailpit` — `nobody`), у всех `cap_drop: ALL` и `no-new-privileges`.
@@ -43,18 +43,20 @@ docker compose up -d --build --wait
 
 ## Эндпоинты
 
-- `POST /api/webhooks/marketplace` — приём событий MarketHub (подпись обязательна).
+- `POST /api/webhooks/marketplace` — приём событий MarketHub (подпись обязательна). Отвечает `202 {"status":"accepted"}`: событие
+  сохранено и поставлено в очередь, применяет его воркер (повтор — `200 duplicate`, неизвестный тип — `200 ignored`).
 - `GET /api/orders?status=&email=&page=&per_page=` — список, сначала новые.
 - `GET /api/orders/{id}` — карточка заказа.
 
 Контракт — [`task/openapi.yaml`](task/openapi.yaml).
 
-Страницы `/admin/orders` и `/admin/orders/{id}` — простая админка только для чтения (фильтры по статусу и
-email, позиции и история статусов), сделана для ручной проверки. Авторизации нет, как и в API.
+Админка (Blade + Alpine.js, только чтение, без авторизации, как и API): `/admin/orders` — список с фильтрами по статусу и
+email (без учёта регистра), выбором размера страницы и пагинацией; `/admin/orders/{id}` — карточка с покупателем, доставкой,
+позициями, итогами и историей статусов. Статические файлы лежат в `public/css` и `public/js`, сборка не нужна.
 
 **Тестовые кнопки** (включены `ADMIN_TEST_TOOLS=true`, в `.env.example` так и стоит): «Создать тестовый заказ» в списке;
-в карточке — переходы в `paid/shipped/delivered/cancelled`, «Дубль последнего события» (ожидаемо `duplicate`)
-и «Устаревший снимок» (ожидаемо `stale`). Кнопки отправляют настоящее подписанное событие через маршрут вебхука
+в карточке — только допустимые следующие статусы (`created` → `paid`/`cancelled`, `paid` → `shipped`/`cancelled`, `shipped` → `delivered`), «Дубль последнего события» (ответ `duplicate`)
+и «Устаревший снимок» (в блоке «События» получит результат `stale`). Кнопки отправляют настоящее подписанное событие через маршрут вебхука
 (подпись, дедупликация, обработка и письма — как у MarketHub); результат показан сверху страницы.
 Кнопки включены, только если одновременно `ADMIN_TEST_TOOLS=true`, `APP_DEBUG=true` и `APP_ENV` не `production`;
 при выключенном дебаге или в продакшене маршруты не регистрируются, даже если флаг стоит.
@@ -72,6 +74,9 @@ done
 curl -s http://localhost:8088/api/orders
 curl -s http://localhost:8088/api/orders/ord_7Q2KX9M4
 ```
+
+Обработка асинхронная: заказ появляется через секунду после ответа 202. Результат по каждому событию (`applied`, `stale`,
+`ignored`, `pending`) виден в блоке «События MarketHub» карточки заказа и в таблице `webhook_events`.
 
 Письма появятся в Mailpit: «оплачен» и «передан в доставку» для `MH-1048213`, «отменён» для `MH-1048377`.
 
