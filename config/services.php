@@ -28,6 +28,12 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'marketplace' => [
+        'webhook_secret' => env('MARKETPLACE_WEBHOOK_SECRET'),
+        // Max allowed clock skew (seconds) between the sender timestamp and now.
+        'webhook_tolerance' => (int) env('MARKETPLACE_WEBHOOK_TOLERANCE', 300),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
