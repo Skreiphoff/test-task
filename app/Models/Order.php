@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\DTO\ListOrdersQueryDto;
 use App\Enums\OrderStatusEnum;
+use App\Models\Builders\OrderBuilder;
 use Carbon\CarbonInterface;
-use Illuminate\Database\Eloquent\Attributes\Scope;
-use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -36,7 +35,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonInterface $updated_at
  * @property-read Collection<int, OrderItem> $items
  * @property-read Collection<int, OrderStatusHistory> $history
+ *
+ * @method static OrderBuilder query()
  */
+#[UseEloquentBuilder(OrderBuilder::class)]
 class Order extends Model
 {
     public $incrementing = false;
@@ -56,18 +58,6 @@ class Order extends Model
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];
-    }
-
-    /** @param  Builder<Order>  $query */
-    #[Scope]
-    protected function filtered(Builder $query, ListOrdersQueryDto $filters): void
-    {
-        $query
-            ->when($filters->status, fn (Builder $q, OrderStatusEnum $status) => $q->where('status', $status))
-            ->when($filters->email, fn (Builder $q, string $email) => $q->whereRaw('LOWER(customer_email) = ?', [$email]))
-            ->orderByDesc('created_at')
-            // Tie-breaker: pages must not overlap for equal timestamps.
-            ->orderByDesc('id');
     }
 
     /** @return HasMany<OrderItem, $this> */
