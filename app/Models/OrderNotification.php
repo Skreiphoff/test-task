@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\NotificationKindEnum;
+use App\Enums\NotificationStatusEnum;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 
@@ -12,7 +13,11 @@ use Illuminate\Database\Eloquent\Model;
  * @property int $id
  * @property string $order_id
  * @property NotificationKindEnum $kind
- * @property CarbonInterface $claimed_at
+ * @property NotificationStatusEnum $status
+ * @property int $attempts
+ * @property ?string $last_error
+ * @property CarbonInterface $created_at
+ * @property ?CarbonInterface $processed_at
  */
 class OrderNotification extends Model
 {
@@ -24,7 +29,10 @@ class OrderNotification extends Model
     {
         return [
             'kind' => NotificationKindEnum::class,
-            'claimed_at' => 'datetime',
+            'status' => NotificationStatusEnum::class,
+            'attempts' => 'integer',
+            'created_at' => 'datetime',
+            'processed_at' => 'datetime',
         ];
     }
 }

@@ -14,12 +14,15 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderStatusHistory;
 use App\Models\WebhookEvent;
+use App\Services\Notifications\NotificationOutbox;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
 class WebhookEventProcessor
 {
+    public function __construct(private readonly NotificationOutbox $outbox) {}
+
     public function process(IncomingEventDto $event): ProcessingOutcomeEnum
     {
         return DB::transaction(function () use ($event): ProcessingOutcomeEnum {
@@ -179,7 +182,8 @@ class WebhookEventProcessor
         ]);
 
         foreach (array_unique($kinds, SORT_REGULAR) as $kind) {
-            if (in_array($snapshot->status, $kind->validStatuses(), true)) {
+            // The outbox row is written in this transaction; the job only speeds up the delivery.
+            if (in_array($snapshot->status, $kind->validStatuses(), true) && $this->outbox->enqueue($snapshot->id, $kind)) {
                 SendOrderNotification::dispatch($snapshot->id, $kind);
             }
         }

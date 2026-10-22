@@ -26,9 +26,9 @@ docker compose up -d --build --wait
 Порты можно сменить, если заняты: `APP_PORT=9000 MAILPIT_PORT=9025 docker compose up -d --wait`
 (по умолчанию 8088 и 8025).
 
-Сервисы: `app` (php-fpm), `web` (nginx), `queue` (воркер очереди), `db` (PostgreSQL), `mailpit`.
+Сервисы: `app` (php-fpm), `web` (nginx), `queue` (воркер очереди), `scheduler` (планировщик, подбирает зависшие письма из outbox), `db` (PostgreSQL), `mailpit`.
 
-Контейнеры rootless: ни один процесс не работает от root (`app`/`queue` — пользователь `app`, `web` — `nginx-unprivileged`
+Контейнеры rootless: ни один процесс не работает от root (`app`/`queue` — пользователь `app`, `scheduler` — тоже `app`, `web` — `nginx-unprivileged`
 на порту 8080 внутри, `db` — `postgres`, `mailpit` — `nobody`), у всех `cap_drop: ALL` и `no-new-privileges`.
 На Linux, чтобы файлы проекта принадлежали вам, передайте свой UID при сборке:
 `APP_UID=$(id -u) docker compose up -d --build --wait` (на macOS подходит значение по умолчанию 1000).

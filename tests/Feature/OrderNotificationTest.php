@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\NotificationKindEnum;
+use App\Enums\NotificationStatusEnum;
 use App\Jobs\SendOrderNotification;
 use App\Models\Order;
 use App\Models\OrderNotification;
+use App\Services\Notifications\NotificationOutbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mime\Email;
 use Tests\Concerns\InteractsWithWebhooks;
@@ -60,24 +63,26 @@ class OrderNotificationTest extends TestCase
         $this->assertStringNotContainsString('возвращены', (string) $this->messageWithSubject('Заказ №MH-1048377 отменён')->getTextBody());
     }
 
-    public function test_queued_job_skips_email_that_became_untrue(): void
+    public function test_outbox_row_for_an_email_that_became_untrue_is_skipped_not_sent(): void
     {
         $this->sendEvent($this->event('order-cancelled'));
         Mail::fake();
 
-        // A stale "paid" job that was queued before the cancellation.
-        (new SendOrderNotification('ord_3HV8PW2C', NotificationKindEnum::Paid))->handle();
+        // A "paid" email queued before the cancellation was processed.
+        $this->outbox()->enqueue('ord_3HV8PW2C', NotificationKindEnum::Paid);
+        (new SendOrderNotification('ord_3HV8PW2C', NotificationKindEnum::Paid))->handle($this->outbox());
 
         Mail::assertNothingSent();
-        $this->assertSame(0, OrderNotification::query()->where('kind', 'paid')->count());
+        $this->assertSame(NotificationStatusEnum::Skipped, $this->notification('ord_3HV8PW2C', 'paid')->status);
     }
 
-    public function test_job_sends_each_kind_at_most_once_even_if_run_twice(): void
+    public function test_a_sent_notification_is_never_sent_again(): void
     {
         $this->sendEvent($this->event('order-paid'));
+        $this->assertSame(NotificationStatusEnum::Sent, $this->notification('ord_7Q2KX9M4', 'paid')->status);
         Mail::fake();
 
-        (new SendOrderNotification('ord_7Q2KX9M4', NotificationKindEnum::Paid))->handle();
+        (new SendOrderNotification('ord_7Q2KX9M4', NotificationKindEnum::Paid))->handle($this->outbox());
 
         Mail::assertNothingSent();
     }
@@ -85,30 +90,89 @@ class OrderNotificationTest extends TestCase
     public function test_malformed_customer_address_is_skipped_without_retrying(): void
     {
         $this->sendEvent($this->event('order-created'));
-        $order = Order::query()->findOrFail('ord_7Q2KX9M4');
-        $order->forceFill(['status' => 'paid', 'customer_email' => 'not-an-email'])->save();
+        Order::query()->findOrFail('ord_7Q2KX9M4')->forceFill(['status' => 'paid', 'customer_email' => 'not-an-email'])->save();
         Mail::fake();
 
-        (new SendOrderNotification($order->id, NotificationKindEnum::Paid))->handle();
+        $this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid);
+        (new SendOrderNotification('ord_7Q2KX9M4', NotificationKindEnum::Paid))->handle($this->outbox());
 
         Mail::assertNothingSent();
-        $this->assertSame(0, OrderNotification::query()->count());
+        $this->assertSame(NotificationStatusEnum::Skipped, $this->notification('ord_7Q2KX9M4', 'paid')->status);
     }
 
-    public function test_failed_send_releases_the_claim_so_a_retry_can_send(): void
+    public function test_failed_send_keeps_the_row_pending_and_records_the_attempt(): void
     {
         $this->sendEvent($this->event('order-created'));
-        $order = Order::query()->findOrFail('ord_7Q2KX9M4');
-        $order->forceFill(['status' => 'paid'])->save();
+        Order::query()->findOrFail('ord_7Q2KX9M4')->forceFill(['status' => 'paid'])->save();
+        $this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid);
 
         Mail::shouldReceive('to')->once()->andThrow(new \RuntimeException('smtp down'));
 
         try {
-            (new SendOrderNotification($order->id, NotificationKindEnum::Paid))->handle();
+            (new SendOrderNotification('ord_7Q2KX9M4', NotificationKindEnum::Paid))->handle($this->outbox());
             $this->fail('Expected the failure to propagate so the queue retries.');
         } catch (\RuntimeException) {
-            $this->assertSame(0, OrderNotification::query()->count());
+            $notification = $this->notification('ord_7Q2KX9M4', 'paid');
+            $this->assertSame(NotificationStatusEnum::Pending, $notification->status);
+            $this->assertSame(1, $notification->attempts);
+            $this->assertSame('smtp down', $notification->last_error);
         }
+    }
+
+    public function test_enqueue_is_idempotent_and_revives_only_skipped_rows(): void
+    {
+        $this->sendEvent($this->event('order-created'));
+
+        $this->assertTrue($this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid));
+        $this->assertFalse($this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid));
+
+        $this->notification('ord_7Q2KX9M4', 'paid')->forceFill(['status' => NotificationStatusEnum::Skipped])->save();
+        $this->assertTrue($this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid));
+        $this->assertSame(NotificationStatusEnum::Pending, $this->notification('ord_7Q2KX9M4', 'paid')->status);
+
+        $this->notification('ord_7Q2KX9M4', 'paid')->forceFill(['status' => NotificationStatusEnum::Sent])->save();
+        $this->assertFalse($this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid));
+        $this->assertSame(1, OrderNotification::query()->count());
+    }
+
+    public function test_stuck_pending_rows_are_redispatched_but_fresh_ones_are_not(): void
+    {
+        $this->sendEvent($this->event('order-created'));
+        $this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid);
+        Queue::fake();
+
+        $this->artisan('notifications:dispatch-stuck')->assertSuccessful();
+        Queue::assertNothingPushed();
+
+        $this->notification('ord_7Q2KX9M4', 'paid')->forceFill(['created_at' => now()->subMinutes(5)])->save();
+        $this->artisan('notifications:dispatch-stuck')->assertSuccessful();
+
+        Queue::assertPushed(SendOrderNotification::class, fn (SendOrderNotification $job) => $job->orderId === 'ord_7Q2KX9M4'
+            && $job->kind === NotificationKindEnum::Paid);
+    }
+
+    public function test_rows_that_exhausted_their_attempts_are_not_redispatched(): void
+    {
+        $this->sendEvent($this->event('order-created'));
+        $this->outbox()->enqueue('ord_7Q2KX9M4', NotificationKindEnum::Paid);
+        $this->notification('ord_7Q2KX9M4', 'paid')
+            ->forceFill(['created_at' => now()->subHour(), 'attempts' => NotificationOutbox::MAX_ATTEMPTS])
+            ->save();
+        Queue::fake();
+
+        $this->artisan('notifications:dispatch-stuck')->assertSuccessful();
+
+        Queue::assertNothingPushed();
+    }
+
+    private function outbox(): NotificationOutbox
+    {
+        return $this->app->make(NotificationOutbox::class);
+    }
+
+    private function notification(string $orderId, string $kind): OrderNotification
+    {
+        return OrderNotification::query()->where('order_id', $orderId)->where('kind', $kind)->firstOrFail();
     }
 
     private function messageWithSubject(string $subject): Email

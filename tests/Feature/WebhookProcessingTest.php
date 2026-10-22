@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\NotificationKindEnum;
+use App\Enums\NotificationStatusEnum;
 use App\Enums\OrderStatusEnum;
 use App\Mail\OrderNotificationMail;
 use App\Models\Order;
@@ -213,6 +214,9 @@ class WebhookProcessingTest extends TestCase
             collect($expected)->map(fn (NotificationKindEnum $k) => $k->value)->sort()->values()->all(),
             $sent,
         );
-        $this->assertSame(count($expected), OrderNotification::query()->count());
+        $this->assertSame(
+            count($expected),
+            OrderNotification::query()->where('status', NotificationStatusEnum::Sent)->count(),
+        );
     }
 }

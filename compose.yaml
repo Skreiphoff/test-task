@@ -46,6 +46,22 @@ services:
       app:
         condition: service_healthy
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
+    command: php artisan schedule:work
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      app:
+        condition: service_healthy
+
   db:
     image: postgres:16-alpine
     user: postgres
