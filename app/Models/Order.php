@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\OrderStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -31,6 +32,22 @@ class Order extends Model
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Shared by the JSON API and the admin pages: optional status and case-insensitive email filters,
+     * newest first. `id` keeps the order stable for equal timestamps, so pages never overlap.
+     *
+     * @param Builder<Order> $query
+     * @return Builder<Order>
+     */
+    public function scopeFiltered(Builder $query, ?string $status, ?string $email): Builder
+    {
+        return $query
+            ->when($status, fn (Builder $q, string $s) => $q->where('status', $s))
+            ->when($email, fn (Builder $q, string $e) => $q->whereRaw('LOWER(customer_email) = ?', [mb_strtolower(trim($e))]))
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
     }
 
     /** @return HasMany<OrderItem, $this> */

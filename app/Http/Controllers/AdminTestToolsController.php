@@ -1,0 +1,79 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers;
+
+use App\Enums\OrderStatus;
+use App\Models\Order;
+use App\Services\Marketplace\TestEventFactory;
+use App\Services\Marketplace\TestWebhookSender;
+use Illuminate\Http\RedirectResponse;
+
+/**
+ * Buttons for manual testing of the webhook pipeline. Registered only when ADMIN_TEST_TOOLS is on.
+ */
+class AdminTestToolsController extends Controller
+{
+    public function __construct(
+        private readonly TestEventFactory $events,
+        private readonly TestWebhookSender $sender,
+    ) {}
+
+    public function createOrder(): RedirectResponse
+    {
+        $event = $this->events->newOrder();
+        $result = $this->sender->send($event);
+
+        return $this->done($result, route('admin.orders.show', $event['data']['order']['id']));
+    }
+
+    public function transition(string $id, string $status): RedirectResponse
+    {
+        $order = Order::query()->with(['items', 'history'])->findOrFail($id);
+        $target = OrderStatus::tryFrom($status) ?? abort(404);
+
+        if ($order->status === $target) {
+            return back()->with('flash', "Заказ уже в статусе {$target->value}, событие не отправлено.");
+        }
+
+        return $this->done(
+            $this->sender->send($this->events->transition($order, $target)),
+            route('admin.orders.show', $id),
+            "Событие order.{$target->value}",
+        );
+    }
+
+    public function duplicate(string $id): RedirectResponse
+    {
+        $order = Order::query()->findOrFail($id);
+        $event = $this->events->duplicateOfLast($order);
+
+        if ($event === null) {
+            return back()->with('flash', 'Нет событий для повтора.');
+        }
+
+        return $this->done($this->sender->send($event), route('admin.orders.show', $id), 'Повтор последнего события');
+    }
+
+    public function stale(string $id): RedirectResponse
+    {
+        $order = Order::query()->with('items')->findOrFail($id);
+
+        return $this->done(
+            $this->sender->send($this->events->stale($order)),
+            route('admin.orders.show', $id),
+            'Устаревший снимок',
+        );
+    }
+
+    /** @param array{status: int, body: array<string, mixed>} $result */
+    private function done(array $result, string $to, string $label = 'Создан тестовый заказ'): RedirectResponse
+    {
+        $outcome = $result['status'] === 200
+            ? 'результат: '.($result['body']['status'] ?? '?')
+            : 'ошибка HTTP '.$result['status'].': '.($result['body']['message'] ?? '');
+
+        return redirect($to)->with('flash', "{$label}, {$outcome}. Письма — в Mailpit.");
+    }
+}

@@ -67,6 +67,9 @@ return [
 
     'timezone' => 'UTC',
 
+    // Admin buttons that send signed test events through the webhook. Keep off in production.
+    'admin_test_tools' => (bool) env('ADMIN_TEST_TOOLS', false),
+
     /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration
